@@ -79,6 +79,27 @@ class Handler(BaseHTTPRequestHandler):
     def _upstream_url(self):
         target = self.server.upstream or self.server.origin
         path = self.path
+
+        # Clients disagree about whether their base URL includes /v1 and
+        # whether they append it themselves. Normalise the known API paths so
+        # that /messages, /v1/messages and /v1/v1/messages all resolve to one
+        # canonical upstream path instead of 404-ing on the gateway.
+        known = ("/messages", "/chat/completions", "/models", "/responses",
+                 "/completions", "/embeddings")
+        p = path.split("?", 1)[0]
+        p = p.rstrip("/") or "/"
+        while p.startswith("/v1/v1"):
+            p = p[3:]
+        if not p.startswith("/v1") and p != "/":
+            for k in known:
+                if p == k or p.endswith(k) and p in ("/v1" + k, k):
+                    p = "/v1" + k
+                    break
+        if p != path.split("?", 1)[0]:
+            if self.server.verbose:
+                sys.stderr.write("[bridge] path %s -> %s\n"
+                                 % (path.split("?", 1)[0], p))
+            path = p + ("?" + path.split("?", 1)[1] if "?" in path else "")
         return target.rstrip("/") + path
 
     def _read_body(self):

@@ -8,9 +8,23 @@ PY="$(command -v python3 || command -v python)"
 
 [ -f "$APPDIR/bridge.py" ] || { echo "bridge.py missing - run install.sh"; exit 1; }
 [ -f "$ENVFILE" ] || { echo "missing $ENVFILE (see .agentrouter-env.example)"; exit 1; }
+
+# Validate before sourcing: the file must contain ONLY export lines.
+# A stray pasted command would otherwise execute here.
+BAD=$(grep -vE '^\s*(export\s+[A-Z_]+=.*)?\s*$' "$ENVFILE" | head -5)
+if [ -n "$BAD" ]; then
+  printf 'REFUSING TO START: %s contains non-assignment lines:\n' "$ENVFILE"
+  printf '%s\n' "$BAD" | sed 's/^/    /'
+  printf 'Fix it with:  printf "export BRIDGE_API_KEY=%%s\\n" '"'"'your-key'"'"' > %s\n' "$ENVFILE"
+  exit 1
+fi
+
 # shellcheck disable=SC1090
 . "$ENVFILE"
 [ -n "${BRIDGE_API_KEY:-}" ] || { echo "BRIDGE_API_KEY empty in $ENVFILE"; exit 1; }
+case "$BRIDGE_API_KEY" in
+  *[!A-Za-z0-9_-]*) echo "BRIDGE_API_KEY looks malformed (unexpected characters)"; exit 1 ;;
+esac
 MODEL="${BRIDGE_MODEL:-gpt-6.1-sol}"
 
 pkill -f "bridge.py --port 8787" 2>/dev/null && { echo "stopped old bridge"; sleep 1; }

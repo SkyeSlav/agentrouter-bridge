@@ -22,9 +22,12 @@ printf '\n\033[1;36m== listening\033[0m\n'
 curl -s -o /dev/null -w '  /v1/models -> HTTP %{http_code}\n' --max-time 8 http://127.0.0.1:8787/v1/models
 
 printf '\n\033[1;36m== scripts present\033[0m\n'
-for f in bridge.py start-bridge.sh probe.sh check.sh; do
+for f in bridge.py; do
   [ -f "$APPDIR/$f" ] && printf '  %-18s ok\n' "$f" || printf '  %-18s MISSING\n' "$f"
 done
-[ -f "$HOME_DIR/probe.sh" ] && printf '  %-18s ok (~/) \n' "probe.sh" || true
-[ -f "$HOME_DIR/start-bridge.sh" ] && printf '  %-18s ok (~/)\n' "start-bridge.sh" || true
+for f in probe.sh start-bridge.sh check.sh; do
+  if [ -f "$HOME_DIR/$f" ]; then printf '  %-18s ok (~/)\n' "$f"
+  elif [ -f "$APPDIR/$f" ]; then printf '  %-18s ok (appdir)\n' "$f"
+  else printf '  %-18s MISSING\n' "$f"; fi
+done
 printf '\n'

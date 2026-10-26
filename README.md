@@ -67,3 +67,17 @@ This project is provided for **educational and interoperability research purpose
 - **No warranty.** The software is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose, and non-infringement. The author is not liable for any claim, damages, or other liability arising from its use.
 - **It will break.** Any real per-client verification, signature check, or endpoint-level attestation will invalidate this approach. Treat the bridge as disposable rather than as infrastructure.
 - **Compliance is your responsibility.** You are responsible for ensuring your use complies with the applicable terms of service and with local law. If the upstream provider asks you to stop, stop.
+
+## Injecting the upstream key
+
+When 9Router (or anything else) sits in front of the bridge, it usually forwards its
+own token or none at all. Pass the credential the bridge should use:
+
+```bash
+python3 bridge.py --port 8787 --api-key sk-your-agentrouter-key            # Bearer
+python3 bridge.py --port 8787 --api-key sk-... --auth-scheme x-api-key     # Anthropic style
+python3 bridge.py --port 8787 --api-key sk-... --auth-scheme both          # send both
+```
+
+Prefer `export BRIDGE_API_KEY=...` over `--api-key` so the key stays out of your
+shell history and out of `ps`.

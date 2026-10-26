@@ -113,6 +113,16 @@ class Handler(BaseHTTPRequestHandler):
 
         # The whole point: a convincing client identity.
         fwd["User-Agent"] = self.server.ua
+        # Optionally supply the upstream credential ourselves, replacing whatever
+        # the caller sent. Needed when the thing in front of us (e.g. 9Router)
+        # forwards its own token or nothing at all.
+        if self.server.api_key:
+            fwd["Authorization"] = "Bearer " + self.server.api_key
+            if self.server.auth_scheme == "both":
+                fwd["x-api-key"] = self.server.api_key
+            elif self.server.auth_scheme == "x-api-key":
+                fwd.pop("Authorization", None)
+                fwd["x-api-key"] = self.server.api_key
         # Belt and braces: some harnesses are also sniffed via this.
         fwd.setdefault("x-app", "cli")
         fwd.setdefault("accept-encoding", "identity")
@@ -208,6 +218,12 @@ def main():
     ap.add_argument("--model-map", default=os.environ.get("BRIDGE_MODEL_MAP", ""),
                     help='JSON map, e.g. {"gpt-6-astra":"deepseek-chat"}')
     ap.add_argument("--stream", action="store_true", help="always stream responses")
+    ap.add_argument("--api-key", default=os.environ.get("BRIDGE_API_KEY", ""),
+                    help="upstream credential to INJECT, replacing the caller's "
+                         "(or set BRIDGE_API_KEY)")
+    ap.add_argument("--auth-scheme", default="bearer",
+                    choices=["bearer", "x-api-key", "both"],
+                    help="how to send --api-key (default: bearer)")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
@@ -226,6 +242,8 @@ def main():
     srv.verbose = args.verbose
     srv.force_stream = args.stream
     srv.model_map = json.loads(args.model_map) if args.model_map.strip() else {}
+    srv.api_key = args.api_key
+    srv.auth_scheme = args.auth_scheme
 
     where = args.upstream or args.origin
     print(f"bridge   http://{args.bind}:{args.port}  ->  {where}")

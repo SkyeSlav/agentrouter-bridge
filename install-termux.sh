@@ -76,18 +76,19 @@ say "Wrote $APPDIR/run.sh"
 # ---------------------------------------------------------------- verify
 say "Smoke test"
 "$PY" "$APPDIR/bridge.py" --port 8787 --profile claude-cli \
-  ${UPSTREAM:+--upstream "$UPSTREAM"} >/tmp/bridge-test.log 2>&1 &
+  ${UPSTREAM:+--upstream "$UPSTREAM"} >"$APPDIR/bridge-test.log" 2>&1 &
 BPID=$!
 sleep 2
 if curl -s -o /dev/null --max-time 5 http://127.0.0.1:8787/v1/models; then
   say "Bridge responds on http://127.0.0.1:8787"
   RESULT=ok
 else
-  say "Bridge did not answer — see /tmp/bridge-test.log"
-  cat /tmp/bridge-test.log || true
+  say "Bridge did not answer — see $APPDIR/bridge-test.log"
+  cat "$APPDIR/bridge-test.log" || true
   RESULT=fail
 fi
 kill $BPID 2>/dev/null || true
+wait $BPID 2>/dev/null || true
 
 cat <<EOF
 

@@ -17,14 +17,17 @@ pkill -f "bridge.py --port 8787" 2>/dev/null && { echo "stopped old bridge"; sle
 
 if command -v tmux >/dev/null 2>&1; then
   tmux kill-session -t bridge 2>/dev/null || true
+  # Export inside the session so the key never appears in the process command line.
   tmux new-session -d -s bridge \
-    "$PY $APPDIR/bridge.py --port 8787 --profile claude-cli \
-     --origin https://agentrouter.org --api-key '$BRIDGE_API_KEY' \
+    "export BRIDGE_API_KEY='$BRIDGE_API_KEY'; \
+     $PY $APPDIR/bridge.py --port 8787 --profile claude-cli \
+     --origin https://agentrouter.org \
      --auth-scheme both --verbose >> $APPDIR/bridge.log 2>&1"
   echo "started in tmux session 'bridge'"
 else
-  nohup "$PY" "$APPDIR/bridge.py" --port 8787 --profile claude-cli \
-    --origin https://agentrouter.org --api-key "$BRIDGE_API_KEY" \
+  # shellcheck disable=SC2086
+  BRIDGE_API_KEY="$BRIDGE_API_KEY" nohup "$PY" "$APPDIR/bridge.py" --port 8787 \
+    --profile claude-cli --origin https://agentrouter.org \
     --auth-scheme both --verbose >> "$APPDIR/bridge.log" 2>&1 &
   echo "started with nohup (pid $!) - will die if Termux is killed"
 fi

@@ -26,6 +26,7 @@ import json
 import os
 import sys
 import urllib.request
+import time
 import urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -127,29 +128,47 @@ class Handler(BaseHTTPRequestHandler):
         fwd.setdefault("x-app", "cli")
         fwd.setdefault("accept-encoding", "identity")
 
-        req = urllib.request.Request(
-            self._upstream_url(),
-            data=body if body else None,
-            headers=fwd,
-            method=self.command,
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=600) as resp:
-                self._relay(resp.status, resp.headers, resp)
-        except urllib.error.HTTPError as e:
-            self._relay(e.code, e.headers, e)
-        except Exception as e:  # network / TLS / timeout
-            payload = json.dumps({
-                "error": {
-                    "message": f"bridge upstream failure: {e}",
-                    "type": "bridge_error",
-                }
-            }).encode()
-            self.send_response(502)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
+        url = self._upstream_url()
+        last_err = None
+        attempts = max(1, self.server.retries)
+
+        for attempt in range(attempts):
+            req = urllib.request.Request(
+                url,
+                data=body if body else None,
+                headers=fwd,
+                method=self.command,
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=600) as resp:
+                    self._relay(resp.status, resp.headers, resp)
+                    return
+            except urllib.error.HTTPError as e:
+                # A real HTTP answer from upstream: relay it, never retry.
+                self._relay(e.code, e.headers, e)
+                return
+            except Exception as e:  # network / TLS / transient reset
+                last_err = e
+                first = (attempt == 0)
+                if not first and self.server.verbose:
+                    sys.stderr.write("[bridge] retry %d/%d failed: %r\n"
+                                     % (attempt + 1, attempts, e))
+                if attempt + 1 < attempts:
+                    time.sleep(self.server.retry_delay)
+                    continue
+                payload = json.dumps({
+                    "error": {
+                        "message": "bridge upstream failure after %d attempt(s): %r"
+                                   % (attempts, e),
+                        "type": "bridge_error",
+                    }
+                }).encode()
+                self.send_response(502)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
 
     def _relay(self, status, headers, src):
         self.send_response(status)
@@ -228,6 +247,10 @@ def main():
     ap.add_argument("--auth-scheme", default="bearer",
                     choices=["bearer", "x-api-key", "both"],
                     help="how to send --api-key (default: bearer)")
+    ap.add_argument("--retries", type=int, default=3,
+                    help="retry transient connection failures (default 3)")
+    ap.add_argument("--retry-delay", type=float, default=0.4,
+                    help="seconds between retries (default 0.4)")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
@@ -248,6 +271,8 @@ def main():
     srv.model_map = json.loads(args.model_map) if args.model_map.strip() else {}
     srv.api_key = args.api_key
     srv.auth_scheme = args.auth_scheme
+    srv.retries = args.retries
+    srv.retry_delay = args.retry_delay
 
     where = args.upstream or args.origin
     print(f"bridge   http://{args.bind}:{args.port}  ->  {where}")

@@ -21,7 +21,7 @@ run() {  # label, url, extra-curl-args...
   else printf '           (empty body)\n'; fi
 }
 
-REQ="{\"model\":\"$M\",\"max_tokens\":12,\"messages\":[{\"role\":\"user\",\"content\":\"say ok\"}]}"
+REQ="{\"model\":\"$M\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":\"say ok\"}]}"
 
 printf '\n\033[1;36m== through the bridge (%s)\033[0m\n' "$URL"
 for i in 1 2 3; do

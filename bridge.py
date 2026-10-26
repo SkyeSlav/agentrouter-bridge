@@ -144,8 +144,29 @@ class Handler(BaseHTTPRequestHandler):
                     self._relay(resp.status, resp.headers, resp)
                     return
             except urllib.error.HTTPError as e:
-                # A real HTTP answer from upstream: relay it, never retry.
-                self._relay(e.code, e.headers, e)
+                # Relay most upstream errors untouched. But a 5xx that mentions
+                # "upstream error" is the gateway's own backend hiccup, not a
+                # client mistake - retrying it is safe and usually succeeds.
+                body_peek = b""
+                try:
+                    body_peek = e.read()
+                except Exception:
+                    pass
+                retryable = (
+                    e.code >= 500
+                    and b"upstream error" in body_peek
+                    and attempt + 1 < attempts
+                )
+                if retryable:
+                    last_err = e
+                    if self.server.verbose:
+                        sys.stderr.write(
+                            "[bridge] upstream %d (backend hiccup), retry %d/%d\n"
+                            % (e.code, attempt + 1, attempts))
+                    time.sleep(self.server.retry_delay)
+                    continue
+                # Not retryable: replay the body we already consumed.
+                self._relay_with_body(e.code, e.headers, body_peek)
                 return
             except Exception as e:  # network / TLS / transient reset
                 last_err = e
@@ -169,6 +190,16 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(payload)
                 return
+
+    def _relay_with_body(self, status, headers, body):
+        self.send_response(status)
+        for k, v in headers.items():
+            if k.lower() in ("content-type", "request-id", "x-request-id",
+                             "x-oneapi-request-id", "retry-after"):
+                self.send_header(k, v)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _relay(self, status, headers, src):
         self.send_response(status)

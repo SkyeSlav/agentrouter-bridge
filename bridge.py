@@ -152,10 +152,14 @@ class Handler(BaseHTTPRequestHandler):
                     body_peek = e.read()
                 except Exception:
                     pass
+                # A 5xx is retryable if it is the gateway's own backend hiccup
+                # (JSON "upstream error") OR a non-JSON error page from its edge
+                # (edge proxies emit HTML 502s that no JSON client can parse).
+                looks_json = body_peek.lstrip()[:1] in (b"{", b"[")
                 retryable = (
                     e.code >= 500
-                    and b"upstream error" in body_peek
                     and attempt + 1 < attempts
+                    and (b"upstream error" in body_peek or not looks_json)
                 )
                 if retryable:
                     last_err = e
@@ -191,17 +195,63 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(payload)
                 return
 
+    def _as_json_error(self, status, body):
+        """Rewrite a non-JSON upstream error page into a JSON envelope."""
+        head = body.lstrip()[:1] if body else b""
+        if head in (b"{", b"["):
+            return body
+        snippet = body[:200].decode("utf-8", "replace").strip()
+        return json.dumps({
+            "error": {
+                "message": "upstream returned a non-JSON %d page: %s"
+                           % (status, snippet[:160]),
+                "type": "bridge_upstream_page",
+                "upstream_status": status,
+            }
+        }).encode()
+
     def _relay_with_body(self, status, headers, body):
+        body = self._as_json_error(status, body)
         self.send_response(status)
         for k, v in headers.items():
-            if k.lower() in ("content-type", "request-id", "x-request-id",
+            if k.lower() in ("request-id", "x-request-id",
                              "x-oneapi-request-id", "retry-after"):
                 self.send_header(k, v)
+        self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
     def _relay(self, status, headers, src):
+        data = src.read() if status >= 400 else None
+        if status >= 400:
+            head = data.lstrip()[:1] if data else b""
+            if head not in (b"{", b"["):
+                # Upstream sent an HTML/plain error page. Convert it so that
+                # JSON-only clients (9Router, editors) can parse the failure
+                # instead of reporting "invalid JSON".
+                snippet = data[:200].decode("utf-8", "replace").strip()
+                data = json.dumps({
+                    "error": {
+                        "message": "upstream returned a non-JSON %d page: %s"
+                                   % (status, snippet[:160]),
+                        "type": "bridge_upstream_page",
+                        "upstream_status": status,
+                    }
+                }).encode()
+            headers = dict(headers)
+            headers["Content-Type"] = "application/json"
+            self.send_response(status)
+            for k, v in headers.items():
+                if k.lower() in ("request-id", "x-request-id", "x-oneapi-request-id",
+                                 "retry-after", "cache-control"):
+                    self.send_header(k, v)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+
         self.send_response(status)
         passthrough = (
             "content-type", "cache-control", "request-id", "x-request-id",

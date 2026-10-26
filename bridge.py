@@ -219,8 +219,12 @@ def main():
                     help='JSON map, e.g. {"gpt-6-astra":"deepseek-chat"}')
     ap.add_argument("--stream", action="store_true", help="always stream responses")
     ap.add_argument("--api-key", default=os.environ.get("BRIDGE_API_KEY", ""),
-                    help="upstream credential to INJECT, replacing the caller's "
-                         "(or set BRIDGE_API_KEY)")
+                    help="upstream credential to INJECT, replacing the caller's. "
+                         "Prefer --api-key-file: a value on the command line is "
+                         "visible to every process on the device.")
+    ap.add_argument("--api-key-file", default="",
+                    help="read the injected credential from this file (first line). "
+                         "Keeps the key out of `ps` and shell history.")
     ap.add_argument("--auth-scheme", default="bearer",
                     choices=["bearer", "x-api-key", "both"],
                     help="how to send --api-key (default: bearer)")

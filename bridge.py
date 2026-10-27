@@ -294,8 +294,12 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Connection", "close")
             self.end_headers()
             try:
+                # read1() returns as soon as *some* bytes are available without
+                # blocking for a full buffer - read(1) stalls until the buffer
+                # fills, which made long streaming responses look like they had
+                # died (9Router: "stream stall timeout").
                 while True:
-                    chunk = src.read(1)
+                    chunk = src.read1(65536) if hasattr(src, "read1") else src.read(1)
                     if not chunk:
                         break
                     self.wfile.write(chunk)

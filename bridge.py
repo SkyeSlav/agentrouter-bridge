@@ -24,8 +24,15 @@ Run:
 import argparse
 import json
 import os
+import socket
 import sys
 import urllib.request
+
+# Seconds of silence tolerated from an upstream that has already opened the
+# stream. Long enough for a slow first token (observed 122s of *total* time is
+# fine - that is not 122s of silence), short enough that 9Router fails over
+# quickly instead of holding a dead socket.
+UPSTREAM_STALL = int(os.environ.get("UPSTREAM_STALL_TIMEOUT", "60"))
 import time
 import urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -161,7 +168,7 @@ class Handler(BaseHTTPRequestHandler):
                 method=self.command,
             )
             try:
-                with urllib.request.urlopen(req, timeout=600) as resp:
+                with urllib.request.urlopen(req, timeout=UPSTREAM_STALL) as resp:
                     self._relay(resp.status, resp.headers, resp)
                     return
             except urllib.error.HTTPError as e:
@@ -299,7 +306,15 @@ class Handler(BaseHTTPRequestHandler):
                 # fills, which made long streaming responses look like they had
                 # died (9Router: "stream stall timeout").
                 while True:
-                    chunk = src.read1(65536) if hasattr(src, "read1") else src.read(1)
+                    try:
+                        chunk = src.read1(65536) if hasattr(src, "read1") else src.read(1)
+                    except socket.timeout:
+                        # Stream opened but the upstream stopped sending. Fail
+                        # loudly so 9Router can retry/fail over instead of
+                        # holding a dead socket open until its own stall timer.
+                        if self.server.verbose:
+                            print("upstream stalled: no data for %ds mid-stream" % UPSTREAM_STALL)
+                        break
                     if not chunk:
                         break
                     self.wfile.write(chunk)
